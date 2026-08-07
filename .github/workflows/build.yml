@@ -69,4 +69,3 @@ jobs:
       with:
         name: NetHunter-Kernel-Poco-M5s-Flashable
         path: NetHunter-Kernel-Poco-M5s-Flashable.zip
-        
