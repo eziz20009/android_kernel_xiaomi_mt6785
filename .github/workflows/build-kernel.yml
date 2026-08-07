@@ -17,31 +17,27 @@ jobs:
           sudo apt update
           sudo apt install -y build-essential bc bison flex libssl-dev libncurses5-dev \
                               git zip gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-                              clang llvm lld liblld-dev kmod
+                              clang llvm lld liblld-dev kmod wget
 
       - name: Download Toolchains & AnyKernel3
         run: |
-          cd $GITHUB_WORKSPACE
-          mkdir clang
-          # Загрузка стабильного AOSP Clang (r450780d)
+          mkdir -p clang
           wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12L-release/clang-r450780d.tar.gz
           tar -xzf clang-r450780d.tar.gz -C clang
           rm clang-r450780d.tar.gz
           
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
-  
 
       - name: Configure NetHunter Modules
         run: |
-          cd $GITHUB_WORKSPACE
           export ARCH=arm64
           export SUBARCH=arm64
           
-          # Укажите ваш defconfig (обычно rosemary_defconfig или vendor/rosemary_defconfig)
+          # Укажите ваш defconfig (если лежит в vendor/ — напишите "vendor/rosemary_defconfig")
           DEFCONFIG="rosemary_defconfig"
           make O=out $DEFCONFIG
 
-          # Функция добавления драйверов МОДУЛЯМИ (=m) для защиты от бутлупа
+          # Функция добавления драйверов МОДУЛЯМИ (=m)
           module_opt() {
             if [ -f scripts/config ]; then
               ./scripts/config --file out/.config --module $1
@@ -58,7 +54,14 @@ jobs:
             fi
           }
 
-          # --- Базовая сетевая подсистема ---
+          # --- Обязательные базовые зависимости ---
+          enable_opt CONFIG_WIRELESS
+          enable_opt CONFIG_NETDEVICES
+          enable_opt CONFIG_WLAN
+          enable_opt CONFIG_USB
+          enable_opt CONFIG_USB_SUPPORT
+
+          # --- Сетевая подсистема ---
           enable_opt CONFIG_CFG80211
           enable_opt CONFIG_MAC80211
           enable_opt CONFIG_NET_RADIO
@@ -93,35 +96,35 @@ jobs:
           module_opt CONFIG_USB_RTL8152
           module_opt CONFIG_USB_NET_AX88179_178A
 
-          # Финализация конфига
+          # Финализация конфигурации
           make O=out olddefconfig
 
       - name: Build Kernel & Modules
         run: |
-          cd $GITHUB_WORKSPACE
           export ARCH=arm64
           export SUBARCH=arm64
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           
-          # Компиляция основного ядра
-          make -j$(nproc --all) O=out \
-              CC=clang \
-              CLANG_TRIPLE=aarch64-linux-gnu- \
-              CROSS_COMPILE=aarch64-linux-android- \
-              CROSS_COMPILE_ARM32=arm-linux-androideabi-
-
-          # Компиляция внешних модулей
+          # Сборка основного ядра
           make -j$(nproc --all) O=out \
               CC=clang \
               CLANG_TRIPLE=aarch64-linux-gnu- \
               CROSS_COMPILE=aarch64-linux-android- \
               CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+              WERROR=0
+
+          # Сборка внешних модулей
+          make -j$(nproc --all) O=out \
+              CC=clang \
+              CLANG_TRIPLE=aarch64-linux-gnu- \
+              CROSS_COMPILE=aarch64-linux-android- \
+              CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+              WERROR=0 \
               modules
 
       - name: Protect against Bootloop (Check Kernel Size)
         run: |
-          # Предел безопасного размера основного Image.gz (32 МБ)
-          MAX_SIZE=33554432
+          MAX_SIZE=33554432 # 32 МБ
           
           if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
             IMG_PATH="out/arch/arm64/boot/Image.gz-dtb"
@@ -135,22 +138,22 @@ jobs:
           echo "Размер скомпилированного ядра: $FILE_SIZE байт (Макс: $MAX_SIZE)"
 
           if [ $FILE_SIZE -gt $MAX_SIZE ]; then
-            echo "КРИТИЧЕСКАЯ ОШИБКА: Ядро превышает физический размер BOOT-раздела ($FILE_SIZE > $MAX_SIZE)! Сборка остановлена для предотвращения бутлупа."
+            echo "КРИТИЧЕСКАЯ ОШИБКА: Ядро превышает физический размер BOOT-раздела ($FILE_SIZE > $MAX_SIZE)!"
             exit 1
           fi
 
       - name: Package AnyKernel3 with Modules
         run: |
-          cd $GITHUB_WORKSPACE
-          
-          # 1. Скопировать образ ядра
+          # 1. Копирование образа ядра
           if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
             cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           elif [ -f out/arch/arm64/boot/Image.gz ]; then
             cp out/arch/arm64/boot/Image.gz AnyKernel3/
+          elif [ -f out/arch/arm64/boot/Image ]; then
+            cp out/arch/arm64/boot/Image AnyKernel3/
           fi
 
-          # 2. Собрать и скопировать все .ko модули
+          # 2. Копирование собранных модулей (.ko)
           mkdir -p AnyKernel3/modules/vendor/lib/modules
           find out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \;
 
@@ -161,15 +164,11 @@ jobs:
           sed -i 's/device.name2=.*/device.name2=maltose/g' anykernel.sh
           sed -i 's|block=.*/by-name/boot|block=/dev/block/by-name/boot|g' anykernel.sh
 
-          # 4. Внедрение скрипта установки модулей в anykernel.sh перед write_boot
-          sed -i '/write_boot;/i \
-          ui_print "Установка модулей NetHunter...";\
-          if [ -d "$home/modules" ]; then\
-            cp -r $home/modules/* /;\
-          fi;\
-          ' anykernel.sh
+          # 4. Безопасное добавление скрипта установки модулей без сложного экранирования
+          echo 'ui_print "Установка модулей NetHunter...";' >> anykernel.sh
+          echo 'if [ -d "$home/modules" ]; then cp -r $home/modules/* /; fi;' >> anykernel.sh
 
-          # Архивирование
+          # Создание архива
           zip -r9 ../NetHunter-Kernel-Rosemary-Safe.zip * -x '*.git*' 'README.md'
 
       - name: Upload Artifact
