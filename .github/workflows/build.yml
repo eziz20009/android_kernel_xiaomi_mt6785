@@ -6,25 +6,21 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    container:
+      image: akhilnarang/system:latest # Использование готового окружения для сборки Android
 
     steps:
-    - name: Установка базовых утилит
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y bc bison flex libssl-dev libelf-dev git zip curl python3
-
     - name: Клонирование исходного кода ядра
       uses: actions/checkout@v4
       with:
         submodules: false
         fetch-depth: 1
 
-    - name: Скачивание официального компилятора Google Clang
+    - name: Скачивание официального Google Clang и GCC
       run: |
-        mkdir -p $GITHUB_WORKSPACE/clang
-        cd $GITHUB_WORKSPACE/clang
-        curl -LO https://android.googlesource.com/toolchain/clang
-        tar -xf clang-r487747c.tar.gz
+        git clone --depth=1 https://android.googlesource.com/toolchain/clang $GITHUB_WORKSPACE/clang
+        git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.15-4.8 $GITHUB_WORKSPACE/gcc64
+        git clone --depth=1 https://github.com/gcc-mirror/gcc $GITHUB_WORKSPACE/gcc32
 
     - name: Конфигурация драйверов NetHunter
       run: |
@@ -46,7 +42,7 @@ jobs:
         CONFIG_RT2800USB=m
         CONFIG_RTL8187=m
         CONFIG_RTL_CARDS=m
-        CONFIG_RTL192CU=m
+        CONFIG_RTL8192CU=m
         CONFIG_RTL8XXXU=m
         CONFIG_USB_NET_DRIVERS=y
         CONFIG_USB_RTL8152=m
@@ -55,22 +51,30 @@ jobs:
         CONFIG_USB_NET_RNDIS_HOST=y
         EOF
 
-    - name: Компиляция ядра через Google Clang
+    - name: Компиляция ядра
       run: |
-        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+        # Настройка путей к компиляторам Google
+        export PATH=$GITHUB_WORKSPACE/clang/clang-r487747c/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH
         export ARCH=arm64
         export SUBARCH=arm64
+        
         make rosemary_defconfig
-        make -j$(nproc) ARCH=arm64 CC=clang LD=ld.lld Image.gz-dtb
+        make -j$(nproc) ARCH=arm64 \
+          CC=clang \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-android- \
+          CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+          Image.gz-dtb
 
     - name: Подготовка прошиваемого AnyKernel3 ZIP-архива
       run: |
+        sudo apt-get update && sudo apt-get install -y zip
         git clone --depth=1 https://github.com/osm0sis/AnyKernel3 updater
         rm -rf updater/.git
         if [ -f arch/arm64/boot/Image.gz-dtb ]; then
           cp arch/arm64/boot/Image.gz-dtb updater/Image.gz-dtb
         else
-          cp arch/arm64/boot/Image updater/Image
+          cp arch/arm64/boot/Image.gz updater/Image.gz
         fi
         sed -i 's/device.name1=/device.name1=rosemary/g' updater/anykernel.sh
         cd updater
