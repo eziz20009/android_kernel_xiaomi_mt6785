@@ -22,8 +22,14 @@ jobs:
       - name: Download Toolchains & AnyKernel3
         run: |
           cd $GITHUB_WORKSPACE
-          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+          mkdir clang
+          # Загрузка стабильного AOSP Clang (r450780d)
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12L-release/clang-r450780d.tar.gz
+          tar -xzf clang-r450780d.tar.gz -C clang
+          rm clang-r450780d.tar.gz
+          
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+  
 
       - name: Configure NetHunter Modules
         run: |
