@@ -1,7 +1,7 @@
 name: Build NetHunter Kernel for Poco M5s (rosemary)
 
 on:
-  workflow_dispatch: # Позволяет запускать сборку вручную кнопкой
+  workflow_dispatch:
 
 jobs:
   build:
@@ -11,15 +11,16 @@ jobs:
     - name: Установка утилит сборки Linux
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc bison flex libssl-dev libelf-dev clang lld crossbuild-essential-arm64 git curl
+        sudo apt-get install -y bc bison flex libssl-dev libelf-dev clang lld crossbuild-essential-arm64 git curl zip
 
-    - name: Клонирование исходного кода ядра
+    - name: Клонирование исходного кода ядра (Оптимизированное)
+      uses: actions/checkout@v4
+      with:
+        submodules: false
+        fetch-depth: 1
+
+    - name: Конфигурация драйверов NetHunter
       run: |
-        git clone --depth=1 -b lineage-23.2 https://github.com kernel
-        
-    - name: Конфигурация драйверов NetHunter (Мега-пак)
-      run: |
-        cd kernel
         cp arch/arm64/configs/rosemary_defconfig .config
         cat <<EOF >> .config
         CONFIG_USB_GADGET=y
@@ -42,26 +43,32 @@ jobs:
 
     - name: Внедрение HID-патча (Ручная модификация кода)
       run: |
-        cd kernel/drivers/usb/gadget/function/
-        # Добавляем структуры клавиатуры NetHunter перед дескриптором интерфейса
+        cd drivers/usb/gadget/function/
         sed -i '/static struct usb_interface_descriptor hidg_interface_desc/i \
         static struct hidg_func_descriptor ghid_net_usb_kbd = {\n\t.subclass = 1,\n\t.protocol = 1,\n\t.report_length = 8,\n\t.report_desc_length = 63,\n\t.report_desc = {\n\t\t0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x05, 0x07,\n\t\t0x19, 0xe0, 0x29, 0xe7, 0x15, 0x00, 0x25, 0x01,\n\t\t0x75, 0x01, 0x95, 0x08, 0x81, 0x02, 0x95, 0x01,\n\t\t0x75, 0x08, 0x81, 0x03, 0x95, 0x05, 0x75, 0x01,\n\t\t0x05, 0x08, 0x19, 0x01, 0x29, 0x05, 0x91, 0x02,\n\t\t0x95, 0x01, 0x75, 0x03, 0x91, 0x03, 0x95, 0x06,\n\t\t0x75, 0x08, 0x15, 0x00, 0x25, 0x65, 0x05, 0x07,\n\t\t0x19, 0x00, 0x29, 0x65, 0x81, 0x00, 0xc0\n\t}\n};\n' f_hid.c
         
-        # Модифицируем функцию инициализации hidg_alloc_inst
         sed -i '/config_group_init_type_name(&opts->func_inst.group/a \
         \topts->subclass = 1;\n\topts->protocol = 1;\n\topts->report_length = 8;\n\topts->report_desc_length = 63;\n\tmemcpy(opts->report_desc, ghid_net_usb_kbd.report_desc, 63);' f_hid.c
 
     - name: Компиляция ядра
       run: |
-        cd kernel
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-gnu-
         make rosemary_defconfig
         make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image.gz-dtb
 
-    - name: Сохранение готового файла ядра
+    - name: Подготовка прошиваемого AnyKernel3 ZIP-архива
+      run: |
+        git clone --depth=1 https://github.com updater
+        rm -rf updater/.git
+        cp arch/arm64/boot/Image.gz-dtb updater/Image.gz-dtb
+        # Настройка скрипта под кодовое имя rosemary
+        sed -i 's/device.name1=/device.name1=rosemary/g' updater/anykernel.sh
+        cd updater
+        zip -r3 ../NetHunter-Kernel-Poco-M5s.zip *
+
+    - name: Сохранение готового архива для прошивки
       uses: actions/upload-artifact@v4
       with:
-        name: NetHunter-Kernel-Poco-M5s
-        path: kernel/arch/arm64/boot/Image.gz-dtb
-        
+        name: NetHunter-Kernel-Poco-M5s-Flashable
+        path: NetHunter-Kernel-Poco-M5s.zip
