@@ -1,9 +1,9 @@
-name: Build NetHunter Kernel (Full Drivers)
+name: Build NetHunter Kernel (Poco M5s)
 
 on:
   workflow_dispatch:
   push:
-    branches: [ "lineage-23.2" ]
+    branches: [ "lineage-23.2" ] # Измените на имя вашей ветки, если отличается
 
 jobs:
   build:
@@ -17,152 +17,158 @@ jobs:
           sudo apt update
           sudo apt install -y build-essential bc bison flex libssl-dev libncurses5-dev \
                               git zip gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-                              clang llvm lld
+                              clang llvm lld liblld-dev kmod
 
-      - name: Download Toolchains
+      - name: Download Toolchains & AnyKernel3
         run: |
           cd $GITHUB_WORKSPACE
           git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
 
-      - name: Generate Base Config & Enable Max NetHunter Drivers
+      - name: Configure NetHunter Modules
         run: |
           cd $GITHUB_WORKSPACE
           export ARCH=arm64
           export SUBARCH=arm64
           
-          # Укажите ваш базовый defconfig
+          # Укажите ваш defconfig (обычно rosemary_defconfig или vendor/rosemary_defconfig)
           DEFCONFIG="rosemary_defconfig"
           make O=out $DEFCONFIG
 
-          # Скрипт включения драйверов через scripts/config
-          # (если scripts/config отсутствует, подставится append в out/.config)
-          KCONFIG="out/.config"
+          # Функция добавления драйверов МОДУЛЯМИ (=m) для защиты от бутлупа
+          module_opt() {
+            if [ -f scripts/config ]; then
+              ./scripts/config --file out/.config --module $1
+            else
+              echo "$1=m" >> out/.config
+            fi
+          }
 
           enable_opt() {
             if [ -f scripts/config ]; then
-              ./scripts/config --file $KCONFIG --enable $1
+              ./scripts/config --file out/.config --enable $1
             else
-              echo "$1=y" >> $KCONFIG
+              echo "$1=y" >> out/.config
             fi
           }
 
-          module_opt() {
-            if [ -f scripts/config ]; then
-              ./scripts/config --file $KCONFIG --module $1
-            else
-              echo "$1=m" >> $KCONFIG
-            fi
-          }
-
-          # --- 1. Wireless Stack & Injection Support ---
+          # --- Базовая сетевая подсистема ---
           enable_opt CONFIG_CFG80211
-          enable_opt CONFIG_CFG80211_WEXT
           enable_opt CONFIG_MAC80211
-          enable_opt CONFIG_MAC80211_MESH
-          enable_opt CONFIG_MAC80211_LEDS
           enable_opt CONFIG_NET_RADIO
 
-          # --- 2. Atheros / Qualcomm (AR9271, AR7010, AR9170, ATH6KL) ---
-          enable_opt CONFIG_WLAN_VENDOR_ATH
-          enable_opt CONFIG_ATH_CARDS
-          enable_opt CONFIG_ATH9K_HTC
-          enable_opt CONFIG_ATH9K_HTC_DEBUGFS
-          enable_opt CONFIG_CARL9170
-          enable_opt CONFIG_ATH6KL
-          enable_opt CONFIG_ATH6KL_USB
+          # --- Wi-Fi Драйверы (в виде модулей .ko) ---
+          module_opt CONFIG_ATH9K_HTC
+          module_opt CONFIG_CARL9170
+          module_opt CONFIG_ATH6KL
+          module_opt CONFIG_ATH6KL_USB
+          module_opt CONFIG_RT2X00
+          module_opt CONFIG_RT2800USB
+          module_opt CONFIG_RT2800USB_RT33XX
+          module_opt CONFIG_RT2800USB_RT35XX
+          module_opt CONFIG_RT2800USB_RT53XX
+          module_opt CONFIG_RT2500USB
+          module_opt CONFIG_RT73USB
+          module_opt CONFIG_MT7601U
+          module_opt CONFIG_MT76x0U
+          module_opt CONFIG_MT76x2U
+          module_opt CONFIG_RTL8187
+          module_opt CONFIG_RTL8192CU
+          module_opt CONFIG_RTL8XXXU
 
-          # --- 3. Ralink / MediaTek (RT2800USB, RT3070, RT5370, MT7601U, MT7612U) ---
-          enable_opt CONFIG_WLAN_VENDOR_RALINK
-          enable_opt CONFIG_RT2X00
-          enable_opt CONFIG_RT2800USB
-          enable_opt CONFIG_RT2800USB_RT33XX
-          enable_opt CONFIG_RT2800USB_RT35XX
-          enable_opt CONFIG_RT2800USB_RT3573
-          enable_opt CONFIG_RT2800USB_RT53XX
-          enable_opt CONFIG_RT2800USB_RT55XX
-          enable_opt CONFIG_RT2800USB_UNKNOWN
-          enable_opt CONFIG_RT2500USB
-          enable_opt CONFIG_RT73USB
-          enable_opt CONFIG_WLAN_VENDOR_MEDIATEK
-          enable_opt CONFIG_MT7601U
-          enable_opt CONFIG_MT76x0U
-          enable_opt CONFIG_MT76x2U
-
-          # --- 4. Realtek (RTL8187, RTL8192CU, RTL8xxxu) ---
-          enable_opt CONFIG_WLAN_VENDOR_REALTEK
-          enable_opt CONFIG_RTL8187
-          enable_opt CONFIG_RTL_CARDS
-          enable_opt CONFIG_RTL8192CU
-          enable_opt CONFIG_RTL8XXXU
-          enable_opt CONFIG_RTL8XXXU_UNTESTED
-
-          # --- 5. USB Gadget & HID Attack Support (BadUSB / DuckHunter) ---
+          # --- HID / BadUSB / USB Gadgets ---
           enable_opt CONFIG_USB_GADGET
           enable_opt CONFIG_USB_CONFIGFS
           enable_opt CONFIG_USB_CONFIGFS_F_FS
           enable_opt CONFIG_USB_CONFIGFS_F_HID
-          enable_opt CONFIG_USB_CONFIGFS_F_UAC1
-          enable_opt CONFIG_USB_CONFIGFS_F_UAC2
-          enable_opt CONFIG_USB_CONFIGFS_F_MIDI
-          enable_opt CONFIG_USB_CONFIGFS_F_ACC
+          
+          # --- Bluetooth & Ethernet ---
+          module_opt CONFIG_BT_HCIBTUSB
+          module_opt CONFIG_USB_RTL8152
+          module_opt CONFIG_USB_NET_AX88179_178A
 
-          # --- 6. Bluetooth Subsystem (HCI USB, Atheros, Realtek, Broadcom) ---
-          enable_opt CONFIG_BT
-          enable_opt CONFIG_BT_RFCOMM
-          enable_opt CONFIG_BT_BNEP
-          enable_opt CONFIG_BT_HIDP
-          enable_opt CONFIG_BT_HCIBTUSB
-          enable_opt CONFIG_BT_HCIBTUSB_BCM
-          enable_opt CONFIG_BT_HCIBTUSB_RTL
-          enable_opt CONFIG_BT_HCIUART
-
-          # --- 7. Ethernet / Network Adapters (RTL8152, ASIX, RNDIS) ---
-          enable_opt CONFIG_USB_NET_DRIVERS
-          enable_opt CONFIG_USB_RTL8150
-          enable_opt CONFIG_USB_RTL8152
-          enable_opt CONFIG_USB_NET_AX8817X
-          enable_opt CONFIG_USB_NET_AX88179_178A
-          enable_opt CONFIG_USB_NET_CDCETHER
-          enable_opt CONFIG_USB_NET_CDC_NCM
-          enable_opt CONFIG_USB_NET_RNDIS_HOST
-          enable_opt CONFIG_TUN
-
-          # Обновление конфига с учетом новых зависимостей
+          # Финализация конфига
           make O=out olddefconfig
 
-      - name: Build Kernel
+      - name: Build Kernel & Modules
         run: |
           cd $GITHUB_WORKSPACE
           export ARCH=arm64
           export SUBARCH=arm64
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           
+          # Компиляция основного ядра
           make -j$(nproc --all) O=out \
               CC=clang \
               CLANG_TRIPLE=aarch64-linux-gnu- \
               CROSS_COMPILE=aarch64-linux-android- \
               CROSS_COMPILE_ARM32=arm-linux-androideabi-
 
-      - name: Package AnyKernel3
+          # Компиляция внешних модулей
+          make -j$(nproc --all) O=out \
+              CC=clang \
+              CLANG_TRIPLE=aarch64-linux-gnu- \
+              CROSS_COMPILE=aarch64-linux-android- \
+              CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+              modules
+
+      - name: Protect against Bootloop (Check Kernel Size)
+        run: |
+          # Предел безопасного размера основного Image.gz (32 МБ)
+          MAX_SIZE=33554432
+          
+          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            IMG_PATH="out/arch/arm64/boot/Image.gz-dtb"
+          elif [ -f out/arch/arm64/boot/Image.gz ]; then
+            IMG_PATH="out/arch/arm64/boot/Image.gz"
+          else
+            IMG_PATH="out/arch/arm64/boot/Image"
+          fi
+
+          FILE_SIZE=$(stat -c%s "$IMG_PATH")
+          echo "Размер скомпилированного ядра: $FILE_SIZE байт (Макс: $MAX_SIZE)"
+
+          if [ $FILE_SIZE -gt $MAX_SIZE ]; then
+            echo "КРИТИЧЕСКАЯ ОШИБКА: Ядро превышает физический размер BOOT-раздела ($FILE_SIZE > $MAX_SIZE)! Сборка остановлена для предотвращения бутлупа."
+            exit 1
+          fi
+
+      - name: Package AnyKernel3 with Modules
         run: |
           cd $GITHUB_WORKSPACE
+          
+          # 1. Скопировать образ ядра
           if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
             cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           elif [ -f out/arch/arm64/boot/Image.gz ]; then
             cp out/arch/arm64/boot/Image.gz AnyKernel3/
           fi
 
+          # 2. Собрать и скопировать все .ko модули
+          mkdir -p AnyKernel3/modules/vendor/lib/modules
+          find out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \;
+
           cd AnyKernel3
+          
+          # 3. Настройка anykernel.sh под Poco M5s
           sed -i 's/device.name1=.*/device.name1=rosemary/g' anykernel.sh
           sed -i 's/device.name2=.*/device.name2=maltose/g' anykernel.sh
           sed -i 's|block=.*/by-name/boot|block=/dev/block/by-name/boot|g' anykernel.sh
-          
-          zip -r9 ../NetHunter-Kernel-Rosemary-FullDrivers.zip * -x '*.git*' 'README.md'
+
+          # 4. Внедрение скрипта установки модулей в anykernel.sh перед write_boot
+          sed -i '/write_boot;/i \
+          ui_print "Установка модулей NetHunter...";\
+          if [ -d "$home/modules" ]; then\
+            cp -r $home/modules/* /;\
+          fi;\
+          ' anykernel.sh
+
+          # Архивирование
+          zip -r9 ../NetHunter-Kernel-Rosemary-Safe.zip * -x '*.git*' 'README.md'
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: NetHunter-Kernel-PocoM5s
-          path: NetHunter-Kernel-Rosemary-FullDrivers.zip
+          path: NetHunter-Kernel-Rosemary-Safe.zip
           
