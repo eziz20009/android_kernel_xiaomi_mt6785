@@ -59,7 +59,7 @@ jobs:
 
     - name: Подготовка прошиваемого AnyKernel3 ZIP-архива
       run: |
-        git clone --depth=1 https://github.com updater
+        git clone --depth=1 https://github.com/osm0sis/AnyKernel3 updater
         rm -rf updater/.git
         cp arch/arm64/boot/Image.gz-dtb updater/Image.gz-dtb
         # Настройка скрипта под кодовое имя rosemary
