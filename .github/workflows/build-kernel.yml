@@ -1,0 +1,168 @@
+name: Build NetHunter Kernel (Full Drivers)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "lineage-23.2" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+
+      - name: Set up Build Environment
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential bc bison flex libssl-dev libncurses5-dev \
+                              git zip gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+                              clang llvm lld
+
+      - name: Download Toolchains
+        run: |
+          cd $GITHUB_WORKSPACE
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+
+      - name: Generate Base Config & Enable Max NetHunter Drivers
+        run: |
+          cd $GITHUB_WORKSPACE
+          export ARCH=arm64
+          export SUBARCH=arm64
+          
+          # Укажите ваш базовый defconfig
+          DEFCONFIG="rosemary_defconfig"
+          make O=out $DEFCONFIG
+
+          # Скрипт включения драйверов через scripts/config
+          # (если scripts/config отсутствует, подставится append в out/.config)
+          KCONFIG="out/.config"
+
+          enable_opt() {
+            if [ -f scripts/config ]; then
+              ./scripts/config --file $KCONFIG --enable $1
+            else
+              echo "$1=y" >> $KCONFIG
+            fi
+          }
+
+          module_opt() {
+            if [ -f scripts/config ]; then
+              ./scripts/config --file $KCONFIG --module $1
+            else
+              echo "$1=m" >> $KCONFIG
+            fi
+          }
+
+          # --- 1. Wireless Stack & Injection Support ---
+          enable_opt CONFIG_CFG80211
+          enable_opt CONFIG_CFG80211_WEXT
+          enable_opt CONFIG_MAC80211
+          enable_opt CONFIG_MAC80211_MESH
+          enable_opt CONFIG_MAC80211_LEDS
+          enable_opt CONFIG_NET_RADIO
+
+          # --- 2. Atheros / Qualcomm (AR9271, AR7010, AR9170, ATH6KL) ---
+          enable_opt CONFIG_WLAN_VENDOR_ATH
+          enable_opt CONFIG_ATH_CARDS
+          enable_opt CONFIG_ATH9K_HTC
+          enable_opt CONFIG_ATH9K_HTC_DEBUGFS
+          enable_opt CONFIG_CARL9170
+          enable_opt CONFIG_ATH6KL
+          enable_opt CONFIG_ATH6KL_USB
+
+          # --- 3. Ralink / MediaTek (RT2800USB, RT3070, RT5370, MT7601U, MT7612U) ---
+          enable_opt CONFIG_WLAN_VENDOR_RALINK
+          enable_opt CONFIG_RT2X00
+          enable_opt CONFIG_RT2800USB
+          enable_opt CONFIG_RT2800USB_RT33XX
+          enable_opt CONFIG_RT2800USB_RT35XX
+          enable_opt CONFIG_RT2800USB_RT3573
+          enable_opt CONFIG_RT2800USB_RT53XX
+          enable_opt CONFIG_RT2800USB_RT55XX
+          enable_opt CONFIG_RT2800USB_UNKNOWN
+          enable_opt CONFIG_RT2500USB
+          enable_opt CONFIG_RT73USB
+          enable_opt CONFIG_WLAN_VENDOR_MEDIATEK
+          enable_opt CONFIG_MT7601U
+          enable_opt CONFIG_MT76x0U
+          enable_opt CONFIG_MT76x2U
+
+          # --- 4. Realtek (RTL8187, RTL8192CU, RTL8xxxu) ---
+          enable_opt CONFIG_WLAN_VENDOR_REALTEK
+          enable_opt CONFIG_RTL8187
+          enable_opt CONFIG_RTL_CARDS
+          enable_opt CONFIG_RTL8192CU
+          enable_opt CONFIG_RTL8XXXU
+          enable_opt CONFIG_RTL8XXXU_UNTESTED
+
+          # --- 5. USB Gadget & HID Attack Support (BadUSB / DuckHunter) ---
+          enable_opt CONFIG_USB_GADGET
+          enable_opt CONFIG_USB_CONFIGFS
+          enable_opt CONFIG_USB_CONFIGFS_F_FS
+          enable_opt CONFIG_USB_CONFIGFS_F_HID
+          enable_opt CONFIG_USB_CONFIGFS_F_UAC1
+          enable_opt CONFIG_USB_CONFIGFS_F_UAC2
+          enable_opt CONFIG_USB_CONFIGFS_F_MIDI
+          enable_opt CONFIG_USB_CONFIGFS_F_ACC
+
+          # --- 6. Bluetooth Subsystem (HCI USB, Atheros, Realtek, Broadcom) ---
+          enable_opt CONFIG_BT
+          enable_opt CONFIG_BT_RFCOMM
+          enable_opt CONFIG_BT_BNEP
+          enable_opt CONFIG_BT_HIDP
+          enable_opt CONFIG_BT_HCIBTUSB
+          enable_opt CONFIG_BT_HCIBTUSB_BCM
+          enable_opt CONFIG_BT_HCIBTUSB_RTL
+          enable_opt CONFIG_BT_HCIUART
+
+          # --- 7. Ethernet / Network Adapters (RTL8152, ASIX, RNDIS) ---
+          enable_opt CONFIG_USB_NET_DRIVERS
+          enable_opt CONFIG_USB_RTL8150
+          enable_opt CONFIG_USB_RTL8152
+          enable_opt CONFIG_USB_NET_AX8817X
+          enable_opt CONFIG_USB_NET_AX88179_178A
+          enable_opt CONFIG_USB_NET_CDCETHER
+          enable_opt CONFIG_USB_NET_CDC_NCM
+          enable_opt CONFIG_USB_NET_RNDIS_HOST
+          enable_opt CONFIG_TUN
+
+          # Обновление конфига с учетом новых зависимостей
+          make O=out olddefconfig
+
+      - name: Build Kernel
+        run: |
+          cd $GITHUB_WORKSPACE
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          
+          make -j$(nproc --all) O=out \
+              CC=clang \
+              CLANG_TRIPLE=aarch64-linux-gnu- \
+              CROSS_COMPILE=aarch64-linux-android- \
+              CROSS_COMPILE_ARM32=arm-linux-androideabi-
+
+      - name: Package AnyKernel3
+        run: |
+          cd $GITHUB_WORKSPACE
+          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+          elif [ -f out/arch/arm64/boot/Image.gz ]; then
+            cp out/arch/arm64/boot/Image.gz AnyKernel3/
+          fi
+
+          cd AnyKernel3
+          sed -i 's/device.name1=.*/device.name1=rosemary/g' anykernel.sh
+          sed -i 's/device.name2=.*/device.name2=maltose/g' anykernel.sh
+          sed -i 's|block=.*/by-name/boot|block=/dev/block/by-name/boot|g' anykernel.sh
+          
+          zip -r9 ../NetHunter-Kernel-Rosemary-FullDrivers.zip * -x '*.git*' 'README.md'
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetHunter-Kernel-PocoM5s
+          path: NetHunter-Kernel-Rosemary-FullDrivers.zip
+          
