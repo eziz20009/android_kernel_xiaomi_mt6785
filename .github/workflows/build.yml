@@ -8,10 +8,10 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Установка утилит сборки Linux
+    - name: Установка базовых утилит
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc bison flex libssl-dev libelf-dev clang lld crossbuild-essential-arm64 git zip
+        sudo apt-get install -y bc bison flex libssl-dev libelf-dev git zip curl python3
 
     - name: Клонирование исходного кода ядра
       uses: actions/checkout@v4
@@ -19,7 +19,14 @@ jobs:
         submodules: false
         fetch-depth: 1
 
-    - name: Конфигурация драйверов NetHunter (Full Wi-Fi Pack)
+    - name: Скачивание официального компилятора Google Clang
+      run: |
+        mkdir -p $GITHUB_WORKSPACE/clang
+        cd $GITHUB_WORKSPACE/clang
+        curl -LO https://android.googlesource.com/toolchain/clang
+        tar -xf clang-r487747c.tar.gz
+
+    - name: Конфигурация драйверов NetHunter
       run: |
         cp arch/arm64/configs/rosemary_defconfig .config
         cat <<EOF >> .config
@@ -39,7 +46,7 @@ jobs:
         CONFIG_RT2800USB=m
         CONFIG_RTL8187=m
         CONFIG_RTL_CARDS=m
-        CONFIG_RTL8192CU=m
+        CONFIG_RTL192CU=m
         CONFIG_RTL8XXXU=m
         CONFIG_USB_NET_DRIVERS=y
         CONFIG_USB_RTL8152=m
@@ -48,18 +55,23 @@ jobs:
         CONFIG_USB_NET_RNDIS_HOST=y
         EOF
 
-    - name: Компиляция ядра
+    - name: Компиляция ядра через Google Clang
       run: |
+        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
         export ARCH=arm64
-        export CROSS_COMPILE=aarch64-linux-gnu-
+        export SUBARCH=arm64
         make rosemary_defconfig
-        make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image.gz-dtb
+        make -j$(nproc) ARCH=arm64 CC=clang LD=ld.lld Image.gz-dtb
 
     - name: Подготовка прошиваемого AnyKernel3 ZIP-архива
       run: |
         git clone --depth=1 https://github.com/osm0sis/AnyKernel3 updater
         rm -rf updater/.git
-        cp arch/arm64/boot/Image.gz-dtb updater/Image.gz-dtb
+        if [ -f arch/arm64/boot/Image.gz-dtb ]; then
+          cp arch/arm64/boot/Image.gz-dtb updater/Image.gz-dtb
+        else
+          cp arch/arm64/boot/Image updater/Image
+        fi
         sed -i 's/device.name1=/device.name1=rosemary/g' updater/anykernel.sh
         cd updater
         zip -r3 ../NetHunter-Kernel-Poco-M5s-Flashable.zip *
@@ -69,3 +81,4 @@ jobs:
       with:
         name: NetHunter-Kernel-Poco-M5s-Flashable
         path: NetHunter-Kernel-Poco-M5s-Flashable.zip
+        
