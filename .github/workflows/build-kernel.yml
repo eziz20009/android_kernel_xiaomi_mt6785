@@ -37,18 +37,22 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
           
-          # Указываем системный GCC/G++ для сборки хостовых утилит (fixdep и др.)
-          export HOSTCC=gcc
-          export HOSTCXX=g++
-          
-          # Укажите имя вашего defconfig (например, rosemary_defconfig)
-          make O=out rosemary_defconfig
-          
-          # Запуск компиляции с правильными хостовыми компиляторами
+          # Главное исправление: отключаем добавление Clang в PATH на этапе HOST-сборки, 
+          # либо явно переопределяем LD, чтобы хост использовал системный линковщик.
           make -j$(nproc) O=out \
-            CC=clang \
             HOSTCC=gcc \
             HOSTCXX=g++ \
+            HOSTLD=ld \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            rosemary_defconfig
+            
+          make -j$(nproc) O=out \
+            HOSTCC=gcc \
+            HOSTCXX=g++ \
+            HOSTLD=ld \
+            CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android-
             
