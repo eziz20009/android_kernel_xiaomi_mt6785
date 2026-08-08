@@ -32,17 +32,17 @@ jobs:
 
       - name: Build Kernel
         run: |
-           export ARCH=arm64
-           export SUBARCH=arm64
-           export CLANG_TRIPLE=aarch64-linux-gnu-
-           export CROSS_COMPILE=aarch64-linux-android-
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-android-
           
-           # Указываем системный GCC/G++ для сборки хостовых утилит (fixdep и др.)
+          # Указываем системный GCC/G++ для сборки хостовых утилит (fixdep и др.)
           export HOSTCC=gcc
           export HOSTCXX=g++
           
           # Укажите имя вашего defconfig (например, rosemary_defconfig)
-           make O=out rosemary_defconfig
+          make O=out rosemary_defconfig
           
           # Запуск компиляции с правильными хостовыми компиляторами
           make -j$(nproc) O=out \
@@ -52,6 +52,7 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android-
             
+      
 
       - name: Package Kernel (AnyKernel3)
         run: |
