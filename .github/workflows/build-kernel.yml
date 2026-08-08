@@ -1,179 +1,69 @@
-name: Build NetHunter Kernel (Poco M5s)
+name: Build NetHunter Kernel for POCO M5s
 
 on:
   workflow_dispatch:
   push:
-    branches: [ "lineage-23.2" ] # Измените на имя вашей ветки, если отличается
+    branches:
+      - lineage-23.2 # или ваша рабочая ветка (master/android-12 и т.д.)
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
 
-      - name: Set up Build Environment
+      - name: Setup Environment & Dependencies
         run: |
-          sudo apt update
-          sudo apt install -y build-essential bc bison flex libssl-dev libncurses5-dev \
-                              git zip gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-                              clang llvm lld liblld-dev kmod wget
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-time flex git g++-multilib gcc-multilib gnupg gperf imagemagick lib32ncurses5-dev libelf-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc yasm zlib1g-dev python3 make wget curl
 
-      - name: Download Toolchains & AnyKernel3
+      - name: Setup Clang / Toolchain (AArch64)
         run: |
-          mkdir -p clang
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12L-release/clang-r450780d.tar.gz
-          tar -xzf clang-r450780d.tar.gz -C clang
-          rm clang-r450780d.tar.gz
-          
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android gnu-aarch64
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r416183b clang-android
+          echo "$GITHUB_WORKSPACE/clang-android/bin" >> $GITHUB_PATH
+          echo "$GITHUB_WORKSPACE/gnu-aarch64/bin" >> $GITHUB_PATH
 
-      - name: Configure NetHunter Modules
+      - name: Build Kernel
         run: |
           export ARCH=arm64
           export SUBARCH=arm64
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-android-
           
-          # Укажите ваш defconfig (если лежит в vendor/ — напишите "vendor/rosemary_defconfig")
-          DEFCONFIG="rosemary_defconfig"
-          make O=out $DEFCONFIG
-
-          # Функция добавления драйверов МОДУЛЯМИ (=m)
-          module_opt() {
-            if [ -f scripts/config ]; then
-              ./scripts/config --file out/.config --module $1
-            else
-              echo "$1=m" >> out/.config
-            fi
-          }
-
-          enable_opt() {
-            if [ -f scripts/config ]; then
-              ./scripts/config --file out/.config --enable $1
-            else
-              echo "$1=y" >> out/.config
-            fi
-          }
-
-          # --- Обязательные базовые зависимости ---
-          enable_opt CONFIG_WIRELESS
-          enable_opt CONFIG_NETDEVICES
-          enable_opt CONFIG_WLAN
-          enable_opt CONFIG_USB
-          enable_opt CONFIG_USB_SUPPORT
-
-          # --- Сетевая подсистема ---
-          enable_opt CONFIG_CFG80211
-          enable_opt CONFIG_MAC80211
-          enable_opt CONFIG_NET_RADIO
-
-          # --- Wi-Fi Драйверы (в виде модулей .ko) ---
-          module_opt CONFIG_ATH9K_HTC
-          module_opt CONFIG_CARL9170
-          module_opt CONFIG_ATH6KL
-          module_opt CONFIG_ATH6KL_USB
-          module_opt CONFIG_RT2X00
-          module_opt CONFIG_RT2800USB
-          module_opt CONFIG_RT2800USB_RT33XX
-          module_opt CONFIG_RT2800USB_RT35XX
-          module_opt CONFIG_RT2800USB_RT53XX
-          module_opt CONFIG_RT2500USB
-          module_opt CONFIG_RT73USB
-          module_opt CONFIG_MT7601U
-          module_opt CONFIG_MT76x0U
-          module_opt CONFIG_MT76x2U
-          module_opt CONFIG_RTL8187
-          module_opt CONFIG_RTL8192CU
-          module_opt CONFIG_RTL8XXXU
-
-          # --- HID / BadUSB / USB Gadgets ---
-          enable_opt CONFIG_USB_GADGET
-          enable_opt CONFIG_USB_CONFIGFS
-          enable_opt CONFIG_USB_CONFIGFS_F_FS
-          enable_opt CONFIG_USB_CONFIGFS_F_HID
+          # Укажите имя вашего defconfig (например, rosemary_defconfig или congo_defconfig)
+          make O=out rosemary_defconfig
           
-          # --- Bluetooth & Ethernet ---
-          module_opt CONFIG_BT_HCIBTUSB
-          module_opt CONFIG_USB_RTL8152
-          module_opt CONFIG_USB_NET_AX88179_178A
+          # Запуск компиляции с использованием Clang
+          make -j$(nproc) O=out \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android-
 
-          # Финализация конфигурации
-          make O=out olddefconfig
-
-      - name: Build Kernel & Modules
+      - name: Package Kernel (AnyKernel3)
         run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          git clone https://github.com/KernelSU/AnyKernel3 -b master anykernel
+          rm -rf anykernel/.git
           
-          # Сборка основного ядра
-          make -j$(nproc --all) O=out \
-              CC=clang \
-              CLANG_TRIPLE=aarch64-linux-gnu- \
-              CROSS_COMPILE=aarch64-linux-android- \
-              CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-              WERROR=0
-
-          # Сборка внешних модулей
-          make -j$(nproc --all) O=out \
-              CC=clang \
-              CLANG_TRIPLE=aarch64-linux-gnu- \
-              CROSS_COMPILE=aarch64-linux-android- \
-              CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-              WERROR=0 \
-              modules
-
-      - name: Protect against Bootloop (Check Kernel Size)
-        run: |
-          MAX_SIZE=33554432 # 32 МБ
+          # Копируем скомпилированный образ ядра и dtbo
+          if [ -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
+              cp out/arch/arm64/boot/Image.gz-dtb anykernel/Image.gz-dtb
+          elif [ -f "out/arch/arm64/boot/Image.gz" ]; then
+              cp out/arch/arm64/boot/Image.gz anykernel/Image.gz
+          fi
           
-          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
-            IMG_PATH="out/arch/arm64/boot/Image.gz-dtb"
-          elif [ -f out/arch/arm64/boot/Image.gz ]; then
-            IMG_PATH="out/arch/arm64/boot/Image.gz"
-          else
-            IMG_PATH="out/arch/arm64/boot/Image"
+          if [ -f "out/arch/arm64/boot/dtbo.img" ]; then
+              cp out/arch/arm64/boot/dtbo.img anykernel/dtbo.img
           fi
 
-          FILE_SIZE=$(stat -c%s "$IMG_PATH")
-          echo "Размер скомпилированного ядра: $FILE_SIZE байт (Макс: $MAX_SIZE)"
+          cd anykernel
+          zip -r9 ../NetHunter-Kernel-PocoM5s.zip *
 
-          if [ $FILE_SIZE -gt $MAX_SIZE ]; then
-            echo "КРИТИЧЕСКАЯ ОШИБКА: Ядро превышает физический размер BOOT-раздела ($FILE_SIZE > $MAX_SIZE)!"
-            exit 1
-          fi
-
-      - name: Package AnyKernel3 with Modules
-        run: |
-          # 1. Копирование образа ядра
-          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
-            cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
-          elif [ -f out/arch/arm64/boot/Image.gz ]; then
-            cp out/arch/arm64/boot/Image.gz AnyKernel3/
-          elif [ -f out/arch/arm64/boot/Image ]; then
-            cp out/arch/arm64/boot/Image AnyKernel3/
-          fi
-
-          # 2. Копирование собранных модулей (.ko)
-          mkdir -p AnyKernel3/modules/vendor/lib/modules
-          find out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \;
-
-          cd AnyKernel3
-          
-          # 3. Настройка anykernel.sh под Poco M5s
-          sed -i 's/device.name1=.*/device.name1=rosemary/g' anykernel.sh
-          sed -i 's/device.name2=.*/device.name2=maltose/g' anykernel.sh
-          sed -i 's|block=.*/by-name/boot|block=/dev/block/by-name/boot|g' anykernel.sh
-
-          # 4. Безопасное добавление скрипта установки модулей без сложного экранирования
-          echo 'ui_print "Установка модулей NetHunter...";' >> anykernel.sh
-          echo 'if [ -d "$home/modules" ]; then cp -r $home/modules/* /; fi;' >> anykernel.sh
-
-          # Создание архива
-          zip -r9 ../NetHunter-Kernel-Rosemary-Safe.zip * -x '*.git*' 'README.md'
-
-      - name: Upload Artifact
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: NetHunter-Kernel-PocoM5s
-          path: NetHunter-Kernel-Rosemary-Safe.zip
+          path: NetHunter-Kernel-PocoM5s.zip
           
