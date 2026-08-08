@@ -1,10 +1,10 @@
-name: Build NetHunter Kernel for POCO M5s
+name: Build NetHunter Kernel for POCO M5s (LineageOS 23.2)
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - lineage-23.2 # или ваша рабочая ветка (master/android-12 и т.д.)
+      - main
 
 jobs:
   build:
@@ -18,18 +18,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison flex git g++-multilib gcc-multilib gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc yasm zlib1g-dev python3 make wget curl
-          
-      - name: Setup Clang / Toolchain (AArch64)
+
+      - name: Setup AOSP Clang & Toolchain
         run: |
-          # Скачиваем проверенный AOSP Clang
+          # Скачиваем актуальный AOSP Clang (поддерживает сборку ядер для новых версий Android)
           git clone --depth=1 https://github.com/kdrag0n/proton-clang clang-android
           
-          # Скачиваем стабильный кросс-компилятор GCC для aarch64
+          # Скачиваем стабильный кросс-компилятор GCC aarch64
           git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 gnu-aarch64
           
           echo "$GITHUB_WORKSPACE/clang-android/bin" >> $GITHUB_PATH
           echo "$GITHUB_WORKSPACE/gnu-aarch64/bin" >> $GITHUB_PATH
-        
 
       - name: Build Kernel
         run: |
@@ -38,10 +37,10 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
           
-          # Укажите имя вашего defconfig (например, rosemary_defconfig или congo_defconfig)
+          # Укажите имя вашего defconfig (например, rosemary_defconfig)
           make O=out rosemary_defconfig
           
-          # Запуск компиляции с использованием Clang
+          # Запуск компиляции
           make -j$(nproc) O=out \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -52,7 +51,6 @@ jobs:
           git clone https://github.com/KernelSU/AnyKernel3 -b master anykernel
           rm -rf anykernel/.git
           
-          # Копируем скомпилированный образ ядра и dtbo
           if [ -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
               cp out/arch/arm64/boot/Image.gz-dtb anykernel/Image.gz-dtb
           elif [ -f "out/arch/arm64/boot/Image.gz" ]; then
@@ -64,11 +62,11 @@ jobs:
           fi
 
           cd anykernel
-          zip -r9 ../NetHunter-Kernel-PocoM5s.zip *
+          zip -r9 ../NetHunter-Kernel-PocoM5s-LOS23.2.zip *
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: NetHunter-Kernel-PocoM5s
-          path: NetHunter-Kernel-PocoM5s.zip
+          name: NetHunter-Kernel-PocoM5s-LOS23.2
+          path: NetHunter-Kernel-PocoM5s-LOS23.2.zip
           
