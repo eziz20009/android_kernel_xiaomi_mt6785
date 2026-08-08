@@ -37,24 +37,33 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
           
-          # Главное исправление: отключаем добавление Clang в PATH на этапе HOST-сборки, 
-          # либо явно переопределяем LD, чтобы хост использовал системный линковщик.
+          # Задаем полный путь к clang, чтобы не добавлять всю папку в глобальный PATH и не ломать системный ld
+          CLANG_BIN="$GITHUB_WORKSPACE/clang-android/bin"
+          
+          # 1. Конфигурация ядра
           make -j$(nproc) O=out \
             HOSTCC=gcc \
             HOSTCXX=g++ \
-            HOSTLD=ld \
-            CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android- \
+            CC="$CLANG_BIN/clang" \
+            AR="$CLANG_BIN/llvm-ar" \
+            LD="$CLANG_BIN/ld.lld" \
+            NM="$CLANG_BIN/llvm-nm" \
+            OBJCOPY="$CLANG_BIN/llvm-objcopy" \
+            OBJDUMP="$CLANG_BIN/llvm-objdump" \
+            STRIP="$CLANG_BIN/llvm-strip" \
             rosemary_defconfig
-            
+          
+          # 2. Сборка ядра
           make -j$(nproc) O=out \
             HOSTCC=gcc \
             HOSTCXX=g++ \
-            HOSTLD=ld \
-            CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android-
+            CC="$CLANG_BIN/clang" \
+            AR="$CLANG_BIN/llvm-ar" \
+            LD="$CLANG_BIN/ld.lld" \
+            NM="$CLANG_BIN/llvm-nm" \
+            OBJCOPY="$CLANG_BIN/llvm-objcopy" \
+            OBJDUMP="$CLANG_BIN/llvm-objdump" \
+            STRIP="$CLANG_BIN/llvm-strip"
             
       
 
