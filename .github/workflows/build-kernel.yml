@@ -21,15 +21,12 @@ jobs:
 
       - name: Setup AOSP Clang & Toolchain
         run: |
-          # Скачиваем актуальный AOSP Clang (поддерживает сборку ядер для новых версий Android)
           git clone --depth=1 https://github.com/kdrag0n/proton-clang clang-android
-          
-          # Скачиваем стабильный кросс-компилятор GCC aarch64
           git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 gnu-aarch64
           
-          echo "$GITHUB_WORKSPACE/clang-android/bin" >> $GITHUB_PATH
+          # Добавляем в PATH только GCC, а Clang будем передавать точечно
           echo "$GITHUB_WORKSPACE/gnu-aarch64/bin" >> $GITHUB_PATH
-
+          
       - name: Build Kernel
         run: |
           export ARCH=arm64
